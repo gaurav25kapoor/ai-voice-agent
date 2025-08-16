@@ -11,6 +11,8 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from google import genai
 import requests
+from fastapi import WebSocket
+from fastapi.responses import HTMLResponse
 
 # ------------------------------------------------------------------------------
 # Load Environment Variables
@@ -251,3 +253,16 @@ def fallback_audio(error_message: str, session_id: str = None):
     except Exception as inner:
         logger.error("Fallback TTS failed: %s", inner, exc_info=True)
         return JSONResponse({"error": error_message}, status_code=500)
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    while True:
+        try:
+            data = await websocket.receive_text()
+            print(f"Message received: {data}")
+            await websocket.send_text(f"Echo: {data}")
+        except Exception as e:
+            print("WebSocket disconnected:", e)
+            break
