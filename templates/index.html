@@ -1,68 +1,160 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AI Voice Agent</title>
+    <meta charset="utf-8" />
+    <title>SoundBox.AI — Voice Agent</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
-  <body
-    class="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-4"
-  >
-    <div
-      class="bg-white/10 backdrop-blur-lg border border-white/20 rounded-2xl shadow-2xl p-8 max-w-lg w-full text-center"
+  <body class="bg-gray-50 font-sans min-h-screen flex flex-col">
+    <!-- Header -->
+    <header
+      class="bg-white shadow-sm py-4 sticky top-0 z-20 border-b border-gray-200"
     >
-      <h1
-        class="text-4xl leading-tight font-extrabold bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 text-transparent bg-clip-text mb-7"
+      <div class="max-w-7xl mx-auto flex items-center justify-between px-5">
+        <span
+          class="text-3xl font-extrabold tracking-tight text-gray-900 transition-colors cursor-pointer"
+        >
+          🎙️ SoundBox<span class="text-blue-600">.AI</span>
+        </span>
+      </div>
+    </header>
+
+    <!-- Main Layout -->
+    <main class="flex-1 flex max-w-7xl mx-auto w-full gap-12 p-10">
+      <!-- Sidebar -->
+      <aside
+        class="w-72 min-h-[75vh] bg-white rounded-2xl shadow-md flex flex-col gap-8 p-6 border border-gray-200"
       >
-        AI Voice Agent
-      </h1>
+        <!-- Personas -->
+        <div>
+          <h2 class="text-lg font-semibold text-gray-800 mb-3">Choose Persona</h2>
+          <select
+            id="personaSelect"
+            class="w-full px-3 py-2 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          >
+            <option value="default" selected>Default Assistant</option>
+            <option value="pirate">🏴‍☠️ Pirate</option>
+            <option value="cowboy">🤠 Cowboy</option>
+            <option value="robot">🤖 Robot</option>
+            <option value="professor">👨‍🏫 Professor</option>
+            <option value="buddy">😊 Friendly Buddy</option>
+          </select>
+        </div>
 
-      <p class="text-gray-300 mb-6">
-        Click <span class="font-semibold text-blue-400">Start</span> to talk to
-        the AI. After it responds, recording will start again automatically.
-      </p>
+        <!-- Skills -->
+        <div>
+          <h2 class="text-lg font-semibold text-gray-800 mb-3">Choose Skill</h2>
+          <select
+            id="skillSelect"
+            class="w-full px-3 py-2 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+          >
+            <option value="none" selected>None</option>
+            <option value="weather">☁️ Weather Updates</option>
+            <option value="news">📰 Latest News</option>
+            <option value="joke">😂 Tell Jokes</option>
+            <option value="quote">📜 Inspirational Quotes</option>
+            <option value="dictionary">📖 Dictionary</option>
+         
+            <option value="time">⏰ Time & Date</option>
+          </select>
+        </div>
 
-      <div class="flex justify-center gap-4 mb-6">
-        <button
-          id="startBtn"
-          class="px-6 py-3 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-lg shadow-lg transform hover:scale-105 transition"
+        <!-- Controls -->
+        <div class="flex flex-col gap-3">
+          <button
+            id="startBtn"
+            class="w-full px-6 py-3 rounded-lg bg-blue-600 text-white font-semibold shadow hover:bg-blue-700 transition"
+          >
+            ▶️ Start
+          </button>
+          <button
+            id="stopBtn"
+            class="w-full px-6 py-3 rounded-lg bg-gray-300 text-gray-600 font-semibold shadow hover:bg-gray-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled
+          >
+            ⏹️ Stop
+          </button>
+        </div>
+
+        <!-- API Config Section -->
+        <div class="mt-6 bg-gray-50 border border-gray-200 rounded-xl shadow p-4">
+          <h2 class="text-base font-semibold text-gray-700 mb-3">🔑 API Configuration</h2>
+          <div class="flex flex-col gap-3">
+            <input
+              type="password"
+              id="murfKey"
+              placeholder="Enter MURF API Key"
+              class="w-full px-3 py-2 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            <input
+              type="password"
+              id="assemblyKey"
+              placeholder="Enter AssemblyAI API Key"
+              class="w-full px-3 py-2 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            <input
+              type="password"
+              id="geminiKey"
+              placeholder="Enter Gemini API Key"
+              class="w-full px-3 py-2 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            <button
+              id="saveKeysBtn"
+              class="w-full px-4 py-2 rounded-lg bg-teal-600 text-white font-medium shadow hover:bg-teal-700 transition"
+            >
+              Save Keys
+            </button>
+          </div>
+        </div>
+
+        <div
+          class="bg-gray-50 border border-gray-200 rounded-xl shadow p-4 text-center"
         >
-          ▶ Start Recording
-        </button>
-        <button
-          id="stopBtn"
-          disabled
-          class="px-6 py-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg shadow-lg transform hover:scale-105 transition disabled:opacity-50"
+          <p class="text-sm text-gray-500">
+            Powered by
+            <span class="font-semibold text-blue-600"
+              >AI Voice Intelligence</span
+            >
+          </p>
+        </div>
+      </aside>
+
+      <!-- Main Content -->
+      <section class="flex-1 flex flex-col items-center gap-10">
+        <!-- Gradient Heading Block -->
+        <div class="relative py-12 w-full">
+          <div
+            class="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-600 blur-2xl opacity-50 -z-10"
+          ></div>
+          <div class="container mx-auto text-center relative">
+            <h1 class="text-5xl font-bold text-gray-900">
+              The Ultimate AI Powered Voice Agent
+            </h1>
+            <p class="mt-4 text-xl text-gray-700">
+              Unleash the power of conversation. Your voice, your way.
+            </p>
+          </div>
+        </div>
+
+        <!-- Chat Box -->
+        <div
+          class="w-full max-w-3xl h-[500px] bg-white shadow-md rounded-2xl flex flex-col overflow-hidden border border-gray-200"
         >
-          ⏹ Stop Recording
-        </button>
-      </div>
+          <div class="px-6 py-3 border-b border-gray-200 bg-gray-50">
+            <h2 class="text-base font-semibold text-gray-700">
+              💬 Conversation
+            </h2>
+          </div>
+          <div
+            id="chatBox"
+            class="flex-1 p-6 space-y-5 overflow-y-auto bg-gray-50"
+          ></div>
+        </div>
+      </section>
+    </main>
 
-      <div id="sessionInfo" class="text-sm text-gray-400 mb-3"></div>
-      <div id="errorMsg" class="text-sm text-red-400 font-semibold mb-3"></div>
-
-      <div id="audioContainer" class="hidden mt-4">
-        <audio
-          id="audioPlayer"
-          controls
-          class="w-full rounded-lg border border-white/20"
-        ></audio>
-      </div>
-    </div>
-
-    <script>
-      // Session ID display
-      const params = new URLSearchParams(window.location.search);
-      let sid = params.get("session_id");
-      if (!sid) {
-        sid = crypto.randomUUID();
-        params.set("session_id", sid);
-        window.history.replaceState({}, "", `${location.pathname}?${params}`);
-      }
-      document.getElementById("sessionInfo").innerText = `Session ID: ${sid}`;
-    </script>
-
-    <script src="/static/script.js"></script>
+    <!-- JS -->
+    <script src="static/script.js" defer></script>
   </body>
 </html>

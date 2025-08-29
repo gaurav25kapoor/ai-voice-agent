@@ -1,128 +1,216 @@
-let mediaRecorder;
-let audioChunks = [];
-let uploadQueue = [];
-let isUploading = false;
-let isRecording = false;
+document.addEventListener("DOMContentLoaded", () => {
+  let ws = null;
+  let audioContext = null;
+  let source = null;
+  let processor = null;
+  let mediaStream = null;
 
-const startBtn = document.getElementById("startBtn");
-const stopBtn = document.getElementById("stopBtn");
-const audioPlayer = document.getElementById("audioPlayer");
-const audioContainer = document.getElementById("audioContainer");
-const errorMsg = document.getElementById("errorMsg");
+  let playQueue = [];
+  let playheadTime = 0;
+  let wavHeaderSeen = false;
+  let userBubble = null;
 
-// Session ID
-const urlParams = new URLSearchParams(window.location.search);
-let sessionId = urlParams.get("session_id");
-if (!sessionId) {
-    sessionId = crypto.randomUUID();
-    urlParams.set("session_id", sessionId);
-    window.history.replaceState({}, "", `${location.pathname}?${urlParams}`);
-}
+  const OUTPUT_RATE = 44100;
+  const AAI_SEND_RATE = 16000;
 
-async function startRecording() {
-    if (isRecording) return; // prevent double start
-    isRecording = true;
-    errorMsg.innerText = "";
-    audioChunks = [];
+  // --- DOM Elements ---
+  const chatBox = document.getElementById("chatBox");
+  const startBtn = document.getElementById("startBtn");
+  const stopBtn = document.getElementById("stopBtn");
+  const audioEl = document.getElementById("audioPlayer");
+  const personaSelect = document.getElementById("personaSelect");
+  const skillSelect = document.getElementById("skillSelect");
+  const saveKeysBtn = document.getElementById("saveKeysBtn");
 
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-        mediaRecorder.start();
+  const murfKeyEl = document.getElementById("murfKey");
+  const assemblyKeyEl = document.getElementById("assemblyKey");
+  const geminiKeyEl = document.getElementById("geminiKey");
 
-        mediaRecorder.addEventListener("dataavailable", event => {
-            if (event.data.size > 0) audioChunks.push(event.data);
-        });
+  // --- Reset session on refresh ---
+  localStorage.removeItem("soundbox_session");
+  const sessionId = `session_${Date.now()}`;
 
-        mediaRecorder.addEventListener("error", e => {
-            console.error("Recorder error:", e);
-            stopRecording();
-            errorMsg.innerText = "⚠ Recording error occurred.";
-            playFallbackAudio();
-        });
+  // --- Load keys if saved ---
+  function loadKeys() {
+    murfKeyEl.value = localStorage.getItem("murfKey") || "";
+    assemblyKeyEl.value = localStorage.getItem("assemblyKey") || "";
+    geminiKeyEl.value = localStorage.getItem("geminiKey") || "";
+  }
+  loadKeys();
 
-        startBtn.disabled = true;
-        stopBtn.disabled = false;
-    } catch (err) {
-        console.error("Mic access error:", err);
-        errorMsg.innerText = "⚠ Microphone access denied.";
-        playFallbackAudio();
-        isRecording = false;
+  saveKeysBtn.addEventListener("click", () => {
+    localStorage.setItem("murfKey", murfKeyEl.value.trim());
+    localStorage.setItem("assemblyKey", assemblyKeyEl.value.trim());
+    localStorage.setItem("geminiKey", geminiKeyEl.value.trim());
+    alert("✅ API keys saved locally!");
+  });
+
+  // --- Utils ---
+  function downsampleBuffer(buffer, inRate, outRate) {
+    if (outRate === inRate) return buffer;
+    const ratio = inRate / outRate;
+    const newLen = Math.round(buffer.length / ratio);
+    const result = new Float32Array(newLen);
+    let offsetResult = 0, offsetBuffer = 0;
+    while (offsetResult < newLen) {
+      const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+      let accum = 0, count = 0;
+      for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+        accum += buffer[i]; count++;
+      }
+      result[offsetResult++] = count ? accum / count : 0;
+      offsetBuffer = nextOffsetBuffer;
     }
-}
+    return result;
+  }
 
-function playFallbackAudio() {
-    const fallback = new SpeechSynthesisUtterance("I'm having trouble connecting right now.");
-    speechSynthesis.speak(fallback);
-}
-
-function stopRecording() {
-    if (!mediaRecorder || mediaRecorder.state === "inactive") return;
-    mediaRecorder.stop();
-
-    mediaRecorder.addEventListener("stop", () => {
-        const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
-        const filename = `recording_${Date.now()}.webm`;
-        uploadQueue.push({ blob: audioBlob, filename });
-        processUploadQueue();
-
-        startBtn.disabled = false;
-        stopBtn.disabled = true;
-        isRecording = false;
-    });
-}
-
-async function processUploadQueue() {
-    if (isUploading || uploadQueue.length === 0) return;
-
-    isUploading = true;
-    const { blob, filename } = uploadQueue.shift();
-
-    const formData = new FormData();
-    formData.append("file", blob, filename);
-
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
-
-        const response = await fetch(`/agent/chat/${sessionId}`, {
-            method: "POST",
-            body: formData,
-            signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            throw new Error(`Server returned ${response.status}`);
-        }
-
-        const data = await response.json();
-        if (data.audio_file) {
-            audioPlayer.src = `${data.audio_file}?t=${Date.now()}`;
-            audioContainer.classList.remove("hidden");
-            await audioPlayer.play();
-
-            audioPlayer.onended = () => {
-                startRecording(); // auto-continue recording
-            };
-        } else {
-            throw new Error(data.error || "Unexpected server error");
-        }
-    } catch (err) {
-        console.error("Upload error:", err);
-        errorMsg.innerText = "⚠ " + (err.message || "Network error, please try again.");
-        playFallbackAudio();
+  function floatTo16BitPCM(float32) {
+    const buffer = new ArrayBuffer(float32.length * 2);
+    const view = new DataView(buffer);
+    for (let i = 0; i < float32.length; i++) {
+      let s = Math.max(-1, Math.min(1, float32[i]));
+      view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
     }
+    return buffer;
+  }
 
-    isUploading = false;
-    processUploadQueue(); // continue next in queue
-}
+  function base64ToUint8Array(b64) {
+    try {
+      const bin = atob(b64);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    } catch {
+      return new Uint8Array(0);
+    }
+  }
 
-// Stop recording if user leaves the page
-window.addEventListener("beforeunload", () => {
-    if (isRecording) stopRecording();
+  // --- UI ---
+  function addMessage(role, text) {
+    if (!text) return;
+    const wrapper = document.createElement("div");
+    wrapper.classList.add("flex", "w-full", "mb-2");
+    if (role === "user") {
+      wrapper.innerHTML = `
+        <div class="ml-auto max-w-[70%] bg-blue-600 text-white rounded-2xl px-4 py-2 shadow user-bubble">
+          ${text}
+        </div>
+      `;
+      userBubble = wrapper.querySelector(".user-bubble");
+    } else {
+      wrapper.innerHTML = `
+        <div class="mr-auto max-w-[70%] bg-gray-200 text-gray-800 rounded-2xl px-4 py-2 shadow">
+          ${text}
+        </div>
+      `;
+    }
+    chatBox.appendChild(wrapper);
+    chatBox.scrollTop = chatBox.scrollHeight;
+  }
+  function updateUserBubble(text) { if (userBubble) userBubble.textContent = text; }
+
+  function wavChunkToFloat32(b64) {
+    const bytes = base64ToUint8Array(b64);
+    if (!bytes.length) return new Float32Array(0);
+    let pcmU8;
+    if (!wavHeaderSeen && bytes.length >= 44) {
+      wavHeaderSeen = true; pcmU8 = bytes.subarray(44);
+    } else if (wavHeaderSeen) pcmU8 = bytes;
+    else return new Float32Array(0);
+    const view = new DataView(pcmU8.buffer, pcmU8.byteOffset, pcmU8.byteLength);
+    const samples = pcmU8.byteLength >> 1;
+    const f32 = new Float32Array(samples);
+    for (let i = 0; i < samples; i++) f32[i] = view.getInt16(i * 2, true) / 32768;
+    return f32;
+  }
+
+  function schedulePlayback() {
+    if (!audioContext) return;
+    if (audioContext.state === "suspended") audioContext.resume();
+    const now = audioContext.currentTime, LOOKAHEAD = 0.05;
+    while (playQueue.length > 0) {
+      const chunk = playQueue.shift();
+      if (!chunk.length) continue;
+      const buf = audioContext.createBuffer(1, chunk.length, OUTPUT_RATE);
+      buf.copyToChannel(chunk, 0);
+      const src = audioContext.createBufferSource();
+      src.buffer = buf; src.connect(audioContext.destination);
+      if (playheadTime < now + LOOKAHEAD) playheadTime = now + LOOKAHEAD;
+      src.start(playheadTime);
+      playheadTime += chunk.length / OUTPUT_RATE;
+    }
+  }
+
+  async function startSession() {
+    playQueue = []; wavHeaderSeen = false; playheadTime = 0; userBubble = null;
+    audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: OUTPUT_RATE });
+    await audioContext.resume();
+
+    const persona = personaSelect.value;
+    const skill = skillSelect.value;
+
+    const murfKey = localStorage.getItem("murfKey") || "";
+    const assemblyKey = localStorage.getItem("assemblyKey") || "";
+    const geminiKey = localStorage.getItem("geminiKey") || "";
+
+    const wsProto = window.location.protocol === "https:" ? "wss" : "ws";
+    ws = new WebSocket(
+      `${wsProto}://${window.location.host}/ws?session_id=${encodeURIComponent(sessionId)}&persona=${encodeURIComponent(persona)}&skill=${encodeURIComponent(skill)}&murfKey=${encodeURIComponent(murfKey)}&assemblyKey=${encodeURIComponent(assemblyKey)}&geminiKey=${encodeURIComponent(geminiKey)}`
+    );
+    ws.binaryType = "arraybuffer";
+
+    ws.onopen = () => { startBtn.disabled = true; stopBtn.disabled = false; addMessage("user", "🎙️ Listening..."); };
+    ws.onclose = () => { startBtn.disabled = false; stopBtn.disabled = true; };
+
+    let lastAssistant = "";
+
+    ws.onmessage = async (evt) => {
+      if (typeof evt.data !== "string") return;
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg.role === "assistant" && msg.text) {
+          const t = (msg.text || "").trim();
+          if (t && t !== lastAssistant) {
+            addMessage("assistant", t);
+            lastAssistant = t;
+          }
+          return;
+        }
+        switch (msg.event) {
+          case "turn_end": updateUserBubble(msg.text || ""); break;
+          case "tts_begin": playQueue = []; wavHeaderSeen = false; playheadTime = audioContext.currentTime + 0.05; break;
+          case "tts_chunk": { const f32 = wavChunkToFloat32(msg.audio_b64 || ""); if (f32.length) { playQueue.push(f32); schedulePlayback(); } break; }
+          case "tts_done": audioEl.play().catch(() => {}); break;
+        }
+      } catch (e) { console.warn("WS parse error", e); }
+    };
+
+    try { mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch { console.error("Mic access denied"); return; }
+
+    source = audioContext.createMediaStreamSource(mediaStream);
+    processor = audioContext.createScriptProcessor(4096, 1, 1);
+    processor.onaudioprocess = (e) => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const input = e.inputBuffer.getChannelData(0);
+      const downsampled = downsampleBuffer(input, audioContext.sampleRate, AAI_SEND_RATE);
+      if (!downsampled.length) return;
+      ws.send(floatTo16BitPCM(downsampled));
+    };
+    source.connect(processor); processor.connect(audioContext.destination);
+  }
+
+  function stopSession() {
+    try { processor?.disconnect(); } catch {}
+    try { source?.disconnect(); } catch {}
+    try { ws?.close(); } catch {}
+    try { mediaStream?.getTracks().forEach((t) => t.stop()); } catch {}
+    try { audioContext?.close(); } catch {}
+    startBtn.disabled = false; stopBtn.disabled = true; userBubble = null;
+  }
+
+  startBtn.addEventListener("click", startSession);
+  stopBtn.addEventListener("click", stopSession);
+  stopBtn.disabled = true;
+  chatBox.innerHTML = "";
 });
-
-startBtn.addEventListener("click", startRecording);
-stopBtn.addEventListener("click", stopRecording);
