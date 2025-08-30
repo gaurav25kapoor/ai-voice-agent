@@ -30,16 +30,20 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
+
 
 @app.get("/health")
 async def health():
     return {"ok": True}
 
+
 HISTORY_FILE = "chat_history.json"
 history_lock = asyncio.Lock()
+
 
 def _load_histories():
     if os.path.exists(HISTORY_FILE):
@@ -50,13 +54,25 @@ def _load_histories():
             logger.warning("Could not load history file (%s). Starting empty. Error: %s", HISTORY_FILE, e)
     return {}
 
+
 session_histories = _load_histories()
 session_personas: Dict[str, str] = {}
 session_skills: Dict[str, str] = {}
-session_keys: Dict[str, Dict[str, str]] = {}
-session_voices: Dict[str, str] = {}  # per-session Murf voice
 session_inflight: Dict[str, bool] = {}
 session_last_text: Dict[str, str] = {}
+
+# Murf voice is fixed
+FIXED_MURF_VOICE = "en-IN-arohi"
+
+PERSONA_PROMPTS = {
+    "default": "You are a helpful AI voice assistant. Speak naturally.",
+    "pirate": "Arr! Ye be a swashbucklin' pirate. Talk with 'aye', 'matey', and pirate slang.",
+    "cowboy": "You're a friendly cowboy from the Wild West. Use phrases like 'Howdy partner!' and cowboy charm.",
+    "robot": "You are a monotone robot. Speak in short, mechanical, precise sentences.",
+    "professor": "You are a wise professor. Explain things clearly, formally, and with patience.",
+    "buddy": "You are a casual supportive buddy. Be warm, cheerful, and encouraging.",
+}
+
 
 async def save_turn(session_id: str, role: str, text: str):
     text = text.strip()
@@ -76,21 +92,6 @@ async def save_turn(session_id: str, role: str, text: str):
         except Exception:
             logger.exception("Failed to write history file")
 
-PERSONA_PROMPTS = {
-    "default": "You are a helpful AI voice assistant. Speak naturally.",
-    "pirate": "Arr! Ye be a swashbucklin' pirate. Talk with 'aye', 'matey', and pirate slang.",
-    "cowboy": "You're a friendly cowboy from the Wild West. Use phrases like 'Howdy partner!' and cowboy charm.",
-    "robot": "You are a monotone robot. Speak in short, mechanical, precise sentences.",
-    "professor": "You are a wise professor. Explain things clearly, formally, and with patience.",
-    "buddy": "You are a casual supportive buddy. Be warm, cheerful, and encouraging.",
-}
-
-def mask_key(v: Optional[str]) -> str:
-    if not v:
-        return "none"
-    if len(v) <= 8:
-        return v[0:2] + "…" + v[-2:]
-    return v[:4] + "…" + v[-4:]
 
 async def safe_send_json(ws: WebSocket, payload: dict):
     try:
@@ -98,10 +99,11 @@ async def safe_send_json(ws: WebSocket, payload: dict):
     except Exception:
         pass
 
+
 # ========= Skills =========
 async def handle_skill(user_text: str, forced_skill: Optional[str] = None) -> Optional[str]:
     skill = forced_skill or ""
-    if skill == "weather" or "weather" in user_text.lower():
+    if (skill == "weather") or ("weather" in user_text.lower()):
         async with aiohttp.ClientSession() as session:
             try:
                 url = "https://api.open-meteo.com/v1/forecast?latitude=28.6&longitude=77.2&current_weather=true"
@@ -114,28 +116,28 @@ async def handle_skill(user_text: str, forced_skill: Optional[str] = None) -> Op
                         return f"The current weather in Delhi is {temp}°C with winds at {wind} km/h."
             except:
                 return "Sorry, I couldn't fetch the weather right now."
-    if skill == "news" or "news" in user_text.lower():
+    if (skill == "news") or ("news" in user_text.lower()):
         headlines = [
             "AI is transforming industries worldwide.",
             "SpaceX successfully launched another batch of satellites.",
             "Scientists discover a new exoplanet in the habitable zone.",
         ]
         return "Here are the latest headlines: " + " ".join(headlines)
-    if skill in ("joke", "jokes") or "joke" in user_text.lower():
+    if (skill in ("joke", "jokes")) or ("joke" in user_text.lower()):
         jokes = [
             "Why did the computer go to the doctor? Because it caught a virus!",
             "Why don’t robots ever get lost? Because they follow their GPS—Giggle Positioning System.",
             "I told my AI to tell me a joke, but it just said 'I'm sorry, I don’t have a sense of humor… yet.'",
         ]
         return random.choice(jokes)
-    if skill == "quote" or "quote" in user_text.lower():
+    if (skill == "quote") or ("quote" in user_text.lower()):
         quotes = [
             "The best way to predict the future is to invent it. — Alan Kay",
             "Do what you can, with what you have, where you are. — Theodore Roosevelt",
             "In the middle of every difficulty lies opportunity. — Albert Einstein",
         ]
         return random.choice(quotes)
-    if skill == "dictionary" or "define" in user_text.lower():
+    if (skill == "dictionary") or ("define" in user_text.lower()):
         words = user_text.split()
         if len(words) > 1:
             term = words[-1]
@@ -152,23 +154,24 @@ async def handle_skill(user_text: str, forced_skill: Optional[str] = None) -> Op
             except:
                 return "Sorry, I couldn't fetch the dictionary meaning right now."
         return "Please tell me which word you'd like me to define."
-    
-    if skill == "time" or "time" in user_text.lower() or "date" in user_text.lower():
+    if (skill == "time") or ("time" in user_text.lower()) or ("date" in user_text.lower()):
         from datetime import datetime
         now = datetime.now().strftime("%A, %d %B %Y, %H:%M:%S")
         return f"The current date and time is {now}."
     return None
 
+
 # ========= Murf Streaming =========
 async def stream_text_via_murf_and_forward(text: str, client_ws: WebSocket, session_id: str):
-    murf_key = session_keys.get(session_id, {}).get("murf") or ENV_MURF_API_KEY
-    if not murf_key:
+    if not ENV_MURF_API_KEY:
         await safe_send_json(client_ws, {"event": "tts_skipped", "reason": "no_murf_key"})
         return
-    voice_id = session_voices.get(session_id, "en-US-ken")  # <- fallback
+    voice_id = FIXED_MURF_VOICE
 
-    uri = f"wss://api.murf.ai/v1/speech/stream-input?api-key={murf_key}&sample_rate=44100&channel_type=MONO&format=WAV"
-
+    uri = (
+        f"wss://api.murf.ai/v1/speech/stream-input"
+        f"?api-key={ENV_MURF_API_KEY}&sample_rate=44100&channel_type=MONO&format=WAV"
+    )
     try:
         async with websockets.connect(uri, ping_interval=20, ping_timeout=30) as murf_ws:
             await murf_ws.send(json.dumps({
@@ -210,12 +213,13 @@ async def stream_text_via_murf_and_forward(text: str, client_ws: WebSocket, sess
     finally:
         await safe_send_json(client_ws, {"event": "tts_done"})
 
+
 # ========= Gemini =========
-def generate_gemini_text(prompt: str, gemini_key: str) -> str:
-    if not gemini_key:
+def generate_gemini_text(prompt: str) -> str:
+    if not ENV_GEMINI_API_KEY:
         return ""
     try:
-        genai.configure(api_key=gemini_key)
+        genai.configure(api_key=ENV_GEMINI_API_KEY)
         model = genai.GenerativeModel("gemini-2.5-flash")
         resp = model.generate_content(prompt)
         txt = getattr(resp, "text", None)
@@ -229,12 +233,8 @@ def generate_gemini_text(prompt: str, gemini_key: str) -> str:
         logger.exception("Gemini generation failed: %s", e)
         return ""
 
-async def gemini_turn_to_murf(prompt: str, client_ws: WebSocket, session_id: str):
-    gemini_key = session_keys.get(session_id, {}).get("gemini") or ENV_GEMINI_API_KEY
-    if not gemini_key:
-        await safe_send_json(client_ws, {"event": "llm_skipped", "reason": "no_gemini_key"})
-        return
 
+async def gemini_turn_to_murf(prompt: str, client_ws: WebSocket, session_id: str):
     forced_skill = session_skills.get(session_id, "none")
     skill_reply = await handle_skill(prompt, None if forced_skill == "none" else forced_skill)
     if skill_reply:
@@ -247,11 +247,12 @@ async def gemini_turn_to_murf(prompt: str, client_ws: WebSocket, session_id: str
     system_prompt = PERSONA_PROMPTS.get(persona, PERSONA_PROMPTS["default"])
     full_prompt = f"{system_prompt}\nUser said: {prompt}\nRespond in character."
 
-    text_to_speak = generate_gemini_text(full_prompt, gemini_key)
+    text_to_speak = generate_gemini_text(full_prompt)
     if text_to_speak:
         await save_turn(session_id, "assistant", text_to_speak)
         await safe_send_json(client_ws, {"event": "turn_end", "role": "assistant", "text": text_to_speak})
         await stream_text_via_murf_and_forward(text_to_speak, client_ws, session_id)
+
 
 # ========= WebSocket Endpoint =========
 @app.websocket("/ws")
@@ -261,20 +262,13 @@ async def ws_endpoint(ws: WebSocket):
     session_id = qp.get("session_id") or str(id(ws))
     persona = qp.get("persona") or "default"
     skill = qp.get("skill") or "none"
-    voice = qp.get("voice") or "en-IN-arohi"
 
-    murf_key = qp.get("murfKey") or qp.get("murf") or ENV_MURF_API_KEY
-    assembly_key = qp.get("assemblyKey") or qp.get("assembly") or ENV_ASSEMBLYAI_KEY
-    gemini_key = qp.get("geminiKey") or qp.get("gemini") or ENV_GEMINI_API_KEY
-
-    session_keys[session_id] = {"murf": murf_key, "assembly": assembly_key, "gemini": gemini_key}
     session_personas[session_id] = persona
     session_skills[session_id] = skill
-    session_voices[session_id] = voice
     session_inflight[session_id] = False
     session_last_text[session_id] = ""
 
-    if not session_keys[session_id]["assembly"]:
+    if not ENV_ASSEMBLYAI_KEY:
         await safe_send_json(ws, {"event": "error", "error": "AssemblyAI key not provided."})
         await ws.close()
         return
@@ -309,10 +303,19 @@ async def ws_endpoint(ws: WebSocket):
     }
     query = "&".join(f"{k}={v}" for k, v in params.items())
     url = f"wss://streaming.assemblyai.com/v3/ws?{query}"
-    headers = [("Authorization", session_keys[session_id]["assembly"])]
+
+    # ✅ websockets 15.x requires list[tuple] for headers
+    headers = [("Authorization", ENV_ASSEMBLYAI_KEY)]
 
     try:
-        async with websockets.connect(url, extra_headers=headers, ping_interval=15, ping_timeout=30, max_size=8*1024*1024) as aai_ws:
+         async with websockets.connect(
+            url,
+            additional_headers=headers,
+            ping_interval=15,
+            ping_timeout=30,
+            max_size=8 * 1024 * 1024
+        ) as aai_ws:
+
             async def upstream():
                 while True:
                     try:
@@ -361,11 +364,6 @@ async def ws_endpoint(ws: WebSocket):
                             await turn_queue.put(transcript_str)
                     elif t in ("Termination", "TerminateSession"):
                         break
-                    elif t == "update_voice":
-                        new_voice = evt.get("voice")
-                        if new_voice:
-                            session_voices[session_id] = new_voice
-                            await safe_send_json(ws, {"event": "voice_updated", "voice": new_voice})
 
             await asyncio.gather(upstream(), downstream())
     finally:
@@ -375,7 +373,7 @@ async def ws_endpoint(ws: WebSocket):
             await worker_task
         except:
             pass
-        for d in [session_keys, session_personas, session_skills, session_voices, session_inflight, session_last_text]:
+        for d in [session_personas, session_skills, session_inflight, session_last_text]:
             d.pop(session_id, None)
         try:
             await ws.close()

@@ -662,5 +662,43 @@
       "role": "assistant",
       "text": "The definition of 'intellectual' is: An intelligent, learned person, especially one who discourses about learned matters."
     }
+  ],
+  "session_1756506612586": [
+    {
+      "role": "user",
+      "text": "hello how are you"
+    },
+    {
+      "role": "assistant",
+      "text": "Hello there! I'm doing great, thank you for asking! I'm ready and here to help. What can I do for you today?"
+    }
+  ],
+  "session_1756506716402": [
+    {
+      "role": "user",
+      "text": "hello how are you"
+    },
+    {
+      "role": "assistant",
+      "text": "Hello! I'm doing very well, thank you for asking. And how are you today?"
+    }
+  ],
+  "session_1756544919826": [
+    {
+      "role": "user",
+      "text": "hello how are you"
+    },
+    {
+      "role": "assistant",
+      "text": "Hello there! I'm functioning perfectly, thank you for asking! And how are you today? What can I help you with?"
+    },
+    {
+      "role": "user",
+      "text": "is the weather of delhi today"
+    },
+    {
+      "role": "assistant",
+      "text": "The current weather in Delhi is 30.6°C with winds at 7.8 km/h."
+    }
   ]
 }

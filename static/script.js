@@ -20,30 +20,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const audioEl = document.getElementById("audioPlayer");
   const personaSelect = document.getElementById("personaSelect");
   const skillSelect = document.getElementById("skillSelect");
-  const saveKeysBtn = document.getElementById("saveKeysBtn");
-
-  const murfKeyEl = document.getElementById("murfKey");
-  const assemblyKeyEl = document.getElementById("assemblyKey");
-  const geminiKeyEl = document.getElementById("geminiKey");
 
   // --- Reset session on refresh ---
-  localStorage.removeItem("soundbox_session");
   const sessionId = `session_${Date.now()}`;
-
-  // --- Load keys if saved ---
-  function loadKeys() {
-    murfKeyEl.value = localStorage.getItem("murfKey") || "";
-    assemblyKeyEl.value = localStorage.getItem("assemblyKey") || "";
-    geminiKeyEl.value = localStorage.getItem("geminiKey") || "";
-  }
-  loadKeys();
-
-  saveKeysBtn.addEventListener("click", () => {
-    localStorage.setItem("murfKey", murfKeyEl.value.trim());
-    localStorage.setItem("assemblyKey", assemblyKeyEl.value.trim());
-    localStorage.setItem("geminiKey", geminiKeyEl.value.trim());
-    alert("✅ API keys saved locally!");
-  });
 
   // --- Utils ---
   function downsampleBuffer(buffer, inRate, outRate) {
@@ -149,13 +128,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const persona = personaSelect.value;
     const skill = skillSelect.value;
 
-    const murfKey = localStorage.getItem("murfKey") || "";
-    const assemblyKey = localStorage.getItem("assemblyKey") || "";
-    const geminiKey = localStorage.getItem("geminiKey") || "";
-
     const wsProto = window.location.protocol === "https:" ? "wss" : "ws";
     ws = new WebSocket(
-      `${wsProto}://${window.location.host}/ws?session_id=${encodeURIComponent(sessionId)}&persona=${encodeURIComponent(persona)}&skill=${encodeURIComponent(skill)}&murfKey=${encodeURIComponent(murfKey)}&assemblyKey=${encodeURIComponent(assemblyKey)}&geminiKey=${encodeURIComponent(geminiKey)}`
+      `${wsProto}://${window.location.host}/ws?session_id=${encodeURIComponent(sessionId)}&persona=${encodeURIComponent(persona)}&skill=${encodeURIComponent(skill)}`
     );
     ws.binaryType = "arraybuffer";
 
